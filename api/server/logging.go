@@ -22,33 +22,8 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 		elapsed := time.Since(start)
 		date := time.Now().Format("2006/01/02 15:04:05")
 
-		status := statusWriter.status
-		var statusColor string
-		switch {
-		case status < 200:
-			statusColor = color.Colorize("b")
-		case status < 300:
-			statusColor = color.Colorize("g")
-		case status < 400:
-			statusColor = color.Colorize("c")
-		case status < 500:
-			statusColor = color.Colorize("y")
-		default:
-			statusColor = color.Colorize("r")
-		}
-
-		method := r.Method
-		var methodColor string
-		switch {
-		case method == http.MethodGet:
-			methodColor = color.Colorize("b")
-		case method == http.MethodPost:
-			methodColor = color.Colorize("g")
-		case method == http.MethodOptions:
-			methodColor = color.Colorize("y")
-		default:
-			methodColor = color.Colorize("r")
-		}
+		statusColor := getStatusColor(statusWriter.status)
+		methodColor := getMethodColor(r.Method)
 
 		user := auth.UserFromContext(r.Context())
 		userText := "unauthenticated"
@@ -56,13 +31,41 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 			userText = color.Sprintf("@ruser: %s", user.Username)
 		}
 
-		statusText := color.Sprintf("%s%s %s%d", methodColor, r.Method, statusColor, status)
+		statusText := color.Sprintf("%s%s %s%d", methodColor, r.Method, statusColor, statusWriter.status)
 		requestText := fmt.Sprintf("%s%s", r.Host, r.URL.Path)
 		durationText := color.Sprintf("@c%s", elapsed)
 
 		fmt.Printf("%s %s %s %s %s\n", date, statusText, requestText, durationText, userText)
 
 	})
+}
+
+func getStatusColor(status int) string {
+	switch {
+	case status < 200:
+		return color.Colorize("b")
+	case status < 300:
+		return color.Colorize("g")
+	case status < 400:
+		return color.Colorize("c")
+	case status < 500:
+		return color.Colorize("y")
+	default:
+		return color.Colorize("r")
+	}
+}
+
+func getMethodColor(method string) string {
+	switch {
+	case method == http.MethodGet:
+		return color.Colorize("b")
+	case method == http.MethodPost:
+		return color.Colorize("g")
+	case method == http.MethodOptions:
+		return color.Colorize("y")
+	default:
+		return color.Colorize("r")
+	}
 }
 
 type statusResponseWriter struct {
