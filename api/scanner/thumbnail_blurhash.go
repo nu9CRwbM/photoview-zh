@@ -11,11 +11,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// GenerateBlurhashes queries the database for media that are missing a blurhash and computes one for them.
-// This function blocks until all hashes have been computed
 func GenerateBlurhashes(db *gorm.DB) error {
 	var results []*models.Media
-
 	processErrors := make([]error, 0)
 
 	query := db.Model(&models.Media{}).
@@ -27,33 +24,17 @@ func GenerateBlurhashes(db *gorm.DB) error {
 	err := query.FindInBatches(&results, 50, func(tx *gorm.DB, batch int) error {
 		log.Printf("generating %d blurhashes", len(results))
 
-		hashes := make([]*string, len(results))
-
 		for i, row := range results {
-
-			thumbnail, err := row.GetThumbnail()
+			hashStr, err := generateBlurhashForRow(row)
 			if err != nil {
-				log.Printf("failed to get thumbnail for media to generate blurhash (%d): %v", row.ID, err)
 				processErrors = append(processErrors, err)
 				continue
 			}
 
-			hashStr, err := GenerateBlurhashFromThumbnail(thumbnail)
-			if err != nil {
-				log.Printf("failed to generate blurhash for media (%d): %v", row.ID, err)
-				processErrors = append(processErrors, err)
-				continue
-			}
-
-			hashes[i] = &hashStr
 			results[i].Blurhash = &hashStr
 		}
 
 		tx.Save(results)
-		// if err := db.Update("blurhash", hashes).Error; err != nil {
-		// 	return err
-		// }
-
 		return nil
 	}).Error
 
@@ -61,14 +42,29 @@ func GenerateBlurhashes(db *gorm.DB) error {
 		return err
 	}
 
-	if len(processErrors) == 0 {
-		return nil
-	} else {
+	if len(processErrors) > 0 {
 		return fmt.Errorf("failed to generate %d blurhashes", len(processErrors))
 	}
+
+	return nil
 }
 
-// GenerateBlurhashFromThumbnail generates a blurhash for a single media and stores it in the database
+func generateBlurhashForRow(row *models.Media) (string, error) {
+	thumbnail, err := row.GetThumbnail()
+	if err != nil {
+		log.Printf("failed to get thumbnail for media to generate blurhash (%d): %v", row.ID, err)
+		return "", err
+	}
+
+	hashStr, err := GenerateBlurhashFromThumbnail(thumbnail)
+	if err != nil {
+		log.Printf("failed to generate blurhash for media (%d): %v", row.ID, err)
+		return "", err
+	}
+
+	return hashStr, nil
+}
+
 func GenerateBlurhashFromThumbnail(thumbnail *models.MediaURL) (string, error) {
 	thumbnail_path, err := thumbnail.CachedPath()
 	if err != nil {
@@ -85,14 +81,5 @@ func GenerateBlurhashFromThumbnail(thumbnail *models.MediaURL) (string, error) {
 		return "", err
 	}
 
-	hashStr, err := blurhash.Encode(4, 3, imageData)
-	if err != nil {
-		return "", err
-	}
-
-	// if err := db.Model(&models.Media{}).Where("id = ?", thumbnail.MediaID).Update("blurhash", hashStr).Error; err != nil {
-	// 	return "", err
-	// }
-
-	return hashStr, nil
+	return blurhash.Encode(4, 3, imageData)
 }
