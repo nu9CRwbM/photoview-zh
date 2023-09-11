@@ -14,43 +14,23 @@ import (
 	"gorm.io/gorm"
 )
 
-func ScanMedia(tx *gorm.DB, mediaPath string, albumId int, cache *scanner_cache.AlbumScannerCache) (*models.Media, bool, error) {
+func getExistingMedia(tx *gorm.DB, mediaPath string) (*models.Media, error) {
+	var media []*models.Media
+	result := tx.Where("path_hash = ?", models.MD5Hash(mediaPath)).Find(&media)
+	if result.Error != nil {
+		return nil, errors.Wrap(result.Error, "scan media fetch from database")
+	}
+	if result.RowsAffected > 0 {
+		return media[0], nil
+	}
+	return nil, nil
+}
+
+func createNewMedia(tx *gorm.DB, mediaPath string, albumId int, mediaTypeText models.MediaType) (*models.Media, error) {
 	mediaName := path.Base(mediaPath)
-
-	// Check if media already exists
-	{
-		var media []*models.Media
-
-		result := tx.Where("path_hash = ?", models.MD5Hash(mediaPath)).Find(&media)
-
-		if result.Error != nil {
-			return nil, false, errors.Wrap(result.Error, "scan media fetch from database")
-		}
-
-		if result.RowsAffected > 0 {
-			// log.Printf("Media already scanned: %s\n", mediaPath)
-			return media[0], false, nil
-		}
-	}
-
-	log.Printf("Scanning media: %s\n", mediaPath)
-
-	mediaType, err := cache.GetMediaType(mediaPath)
-	if err != nil {
-		return nil, false, errors.Wrap(err, "could determine if media was photo or video")
-	}
-
-	var mediaTypeText models.MediaType
-
-	if mediaType.IsVideo() {
-		mediaTypeText = models.MediaTypeVideo
-	} else {
-		mediaTypeText = models.MediaTypePhoto
-	}
-
 	stat, err := os.Stat(mediaPath)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 
 	media := models.Media{
@@ -62,10 +42,41 @@ func ScanMedia(tx *gorm.DB, mediaPath string, albumId int, cache *scanner_cache.
 	}
 
 	if err := tx.Create(&media).Error; err != nil {
-		return nil, false, errors.Wrap(err, "could not insert media into database")
+		return nil, errors.Wrap(err, "could not insert media into database")
 	}
 
-	return &media, true, nil
+	return &media, nil
+}
+
+func ScanMedia(tx *gorm.DB, mediaPath string, albumId int, cache *scanner_cache.AlbumScannerCache) (*models.Media, bool, error) {
+	media, err := getExistingMedia(tx, mediaPath)
+	if err != nil {
+		return nil, false, err
+	}
+	if media != nil {
+		return media, false, nil
+	}
+
+	log.Printf("Scanning media: %s\n", mediaPath)
+
+	mediaType, err := cache.GetMediaType(mediaPath)
+	if err != nil {
+		return nil, false, errors.Wrap(err, "could determine if media was photo or video")
+	}
+
+	var mediaTypeText models.MediaType
+	if mediaType.IsVideo() {
+		mediaTypeText = models.MediaTypeVideo
+	} else {
+		mediaTypeText = models.MediaTypePhoto
+	}
+
+	media, err = createNewMedia(tx, mediaPath, albumId, mediaTypeText)
+	if err != nil {
+		return nil, false, err
+	}
+
+	return media, true, nil
 }
 
 // ProcessSingleMedia processes a single media, might be used to reprocess media with corrupted cache
